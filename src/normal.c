@@ -122,6 +122,7 @@ static void	nv_nbcmd(cmdarg_T *cap);
 static void	nv_drop(cmdarg_T *cap);
 #endif
 static void	nv_cursorhold(cmdarg_T *cap);
+static void	nv_binsearch(cmdarg_T *cap);
 
 // Declare nv_cmds[].
 #define DO_DECLARE_NVCMD
@@ -7570,4 +7571,73 @@ nv_cursorhold(cmdarg_T *cap)
     apply_autocmds(EVENT_CURSORHOLD, NULL, NULL, FALSE, curbuf);
     did_cursorhold = TRUE;
     cap->retval |= CA_COMMAND_BUSY;	// don't call edit() now
+}
+/*
+ * Move cursor by Binary Search. Ctrl_J to move down and Ctrl_K to move up.
+ */
+    static void
+nv_binsearch(cmdarg_T *cap)
+{
+    static linenr_T upper_bound=0,
+		    lower_bound=0,
+		    center_bound=0;	//upper bound and lower bound refer to the line number, i.e. the lower bound
+					//appears at the top of the window (since line number grows downward).
+    int c = 0;
+    
+    static int binsearch_mode = FALSE;
+    
+    if(!binsearch_mode)			//initialize upper and lower bounds and center_bound
+    {
+	binsearch_mode = TRUE;
+        center_bound = curwin->w_cursor.lnum;
+	
+	validate_botline();	    // make sure curwin->w_botline is valid
+	upper_bound = curwin->w_botline;
+	lower_bound = curwin->w_topline;
+    }
+
+    cap->oap->motion_type = MLINE;
+
+    while(TRUE)
+    {
+    c = vgetc();
+
+    //if the user typed Ctrl_Q again, they want to re-start the binary search.
+    if(c == Ctrl_Q)
+    {
+	binsearch_mode = FALSE;
+	vungetc(c);
+	return;
+
+    }
+    if(c==Ctrl_J)
+    {
+
+    lower_bound=center_bound;
+    center_bound = (center_bound + upper_bound)/2;
+    cursor_down(center_bound - lower_bound, TRUE);	//use cursor_down to move instead of any other method
+    vungetc(Ctrl_Q);					//like, say, curwin->w_cursor.lnum =center_line, just in case.
+    return;						//we return after every cursor movement 
+							//to update whatever visual efect may be triggered by
+							//cursor movement, like visual mode.
+							//unget Ctrl_Q to make sure we will come back to
+							//this function after we go back to main and update visual effects.
+    }
+
+    if(c==Ctrl_K)
+    {
+
+    upper_bound=center_bound;
+    center_bound = (center_bound + lower_bound)/2;
+    cursor_up(upper_bound - center_bound, TRUE);
+    vungetc(Ctrl_Q);
+    return;
+    
+    }
+    break;
+
+    }
+    vungetc(c);	//unget c to resume the command that interrupted the binary search
+
+    binsearch_mode = FALSE;
 }
