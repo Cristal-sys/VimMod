@@ -7579,6 +7579,27 @@ nv_cursorhold(cmdarg_T *cap)
     did_cursorhold = TRUE;
     cap->retval |= CA_COMMAND_BUSY;	// don't call edit() now
 }
+
+    static void
+set_horizontal_bounds(colnr_T *left_bound, colnr_T *middle_bound, colnr_T *right_bound)
+{
+    *left_bound = curwin->w_leftcol;
+    *middle_bound = curwin->w_cursor.col;
+
+    colnr_T current_col = curwin->w_cursor.col;
+
+    int rc = coladvance(MAXCOL);
+
+    if(rc == OK)
+    {
+	*right_bound = curwin->w_cursor.col;
+	curwin->w_cursor.col = *middle_bound;
+	curwin->w_curswant = *middle_bound;
+    }
+
+    return;
+}
+
 /*
  * Move cursor by Binary Search. Ctrl_J to move down and Ctrl_K to move up.
  */
@@ -7589,12 +7610,17 @@ nv_binsearch(cmdarg_T *cap)
 		    lower_bound = 0,
 		    center_bound = 0;	//upper bound and lower bound refer to the line number, i.e. the lower bound
 
+    static colnr_T left_bound = 0,
+		   right_bound = 0,
+		   middle_bound = 0;
+
     static pos_T old_pos = {0, 0, 0};
 
     static int binsearch_mode = FALSE,	//appears at the top of the window (since line number grows downward).
 	       old_op_type = OP_NOP,
 	       returned = TRUE,
-	       old_motion_type = 0;
+	       old_motion_type = 0,
+	       started_horizontal_binsearch = FALSE;
 
     int c = 0;
     
@@ -7607,6 +7633,8 @@ nv_binsearch(cmdarg_T *cap)
 	validate_botline();	    // make sure curwin->w_botline is valid
 	upper_bound = curwin->w_botline;
 	lower_bound = curwin->w_topline;
+
+	//get left and right bound
 	
 	if(returned)			    //necessary to not forget the operator pending if we do two binary searches in a row
 	{
@@ -7627,6 +7655,7 @@ nv_binsearch(cmdarg_T *cap)
     if(c == Ctrl_Q)
     {
 	binsearch_mode = FALSE;
+	started_horizontal_binsearch = FALSE;
 	vungetc(c);
 	finish_op = TRUE;			      //make vim remember there is an operator pending and
 	return;					      //avoid flushing oap in normal_cmd. necessary for 
@@ -7634,6 +7663,7 @@ nv_binsearch(cmdarg_T *cap)
     }
     if(c==Ctrl_J)
     {
+    started_horizontal_binsearch = FALSE;
 
     lower_bound=center_bound;
     center_bound = (center_bound + upper_bound)/2;
@@ -7648,6 +7678,7 @@ nv_binsearch(cmdarg_T *cap)
 
     if(c==Ctrl_K)
     {
+    started_horizontal_binsearch = FALSE;
 
     upper_bound=center_bound;
     center_bound = (center_bound + lower_bound)/2;
@@ -7657,6 +7688,39 @@ nv_binsearch(cmdarg_T *cap)
     return;
     
     }
+
+    if(c==Ctrl_H)
+    {
+	if(!started_horizontal_binsearch)
+	{
+	    started_horizontal_binsearch = TRUE;
+	    set_horizontal_bounds(&left_bound, &middle_bound, &right_bound);
+	}
+	right_bound = middle_bound;
+	middle_bound = (middle_bound + left_bound)/2;
+	coladvance(middle_bound);
+
+	vungetc(Ctrl_Q);
+	finish_op = TRUE;
+	return;
+    }
+
+    if(c==Ctrl_L)
+    {
+	if(!started_horizontal_binsearch)
+	{
+	    started_horizontal_binsearch = TRUE;
+	    set_horizontal_bounds(&left_bound, &middle_bound, &right_bound);
+	}
+	left_bound = middle_bound;
+	middle_bound = (middle_bound + right_bound + 1)/2;
+	coladvance(middle_bound);
+
+	vungetc(Ctrl_Q);
+	finish_op = TRUE;
+	return;
+    }
+
     break;
 
     }
@@ -7665,6 +7729,7 @@ nv_binsearch(cmdarg_T *cap)
     {
 	returned = TRUE;
 	binsearch_mode = FALSE;
+	started_horizontal_binsearch = FALSE;
 	clearopbeep(cap->oap);
 	finish_op = FALSE;
 	showcmd_binsearch = TRUE;
@@ -7676,14 +7741,19 @@ nv_binsearch(cmdarg_T *cap)
     if(c != Ctrl_R)
 	vungetc(c);			    //unget c to resume the command that interrupted the binary search
 
+    if(cap->oap->motion_force == NUL && old_op_type != OP_NOP)		    //defaul motion force should be linewise 
+	cap->oap->motion_force = (started_horizontal_binsearch ? 'v' : 'V');//unless we used horizontal binsrch last, when we do charwise
+
+    if(started_horizontal_binsearch)
+	curwin->w_curswant = middle_bound;
+
     binsearch_mode = FALSE;
+    started_horizontal_binsearch = FALSE;
+
     showcmd_binsearch = TRUE;
     cap->oap->op_type = old_op_type;//resume pending operator
 
     cap->oap->motion_type = old_motion_type; //conserve motion type
-
-    if(cap->oap->motion_force == NUL && old_op_type != OP_NOP)	//defaul motion force should be linewise
-	cap->oap->motion_force = 'V';
 
     if(old_op_type != OP_NOP)
 	finish_op = TRUE;
