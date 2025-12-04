@@ -7698,7 +7698,7 @@ nv_binsearch(cmdarg_T *cap)
 	}
 	right_bound = middle_bound;
 	middle_bound = (middle_bound + left_bound)/2;
-	coladvance(middle_bound);
+	curwin->w_cursor.col = middle_bound;
 
 	vungetc(Ctrl_Q);
 	finish_op = TRUE;
@@ -7714,7 +7714,7 @@ nv_binsearch(cmdarg_T *cap)
 	}
 	left_bound = middle_bound;
 	middle_bound = (middle_bound + right_bound + 1)/2;
-	coladvance(middle_bound);
+	curwin->w_cursor.col = middle_bound;
 
 	vungetc(Ctrl_Q);
 	finish_op = TRUE;
